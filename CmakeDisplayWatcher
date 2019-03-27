@@ -1,0 +1,147 @@
+SET(UNIT_NAME DisplayWatcher)
+
+if(DEFINED BIN_OUTPUT_NAME)
+    message("---------------------------BIN_OUTPUT_NAME = ${BIN_OUTPUT_NAME}")
+else (DEFINED BIN_OUTPUT_NAME)
+    SET(BIN_OUTPUT_NAME TrueConf)
+endif(DEFINED BIN_OUTPUT_NAME)
+
+if (${UnityBuild})
+include(cotire  OPTIONAL)
+endif()
+
+SET(CMAKE_AUTOMOC ON)
+
+
+INCLUDE_DIRECTORIES(
+${CMAKE_SOURCE_DIR}
+${CMAKE_SOURCE_DIR}/${UNIT_NAME}
+${CMAKE_SOURCE_DIR}/WinBased
+C:/Other_libraries/tcw_730_20190307.3/libusb1/include
+)
+
+SET(${UNIT_NAME}_SRCS
+main.cpp
+
+VSQUSBNotify.cpp
+VSQWebSwitcher.cpp
+Program_close.cpp
+../WinBased/Helpers/VSCommandLineConverter.cpp
+)
+
+
+SET(${UNIT_NAME}_HDRS
+VSQUSBNotify.h
+VSQWebSwitcher.h
+Program_close.h
+)
+
+SET(${UNIT_NAME}_RCS
+Resource.qrc
+)
+
+#SET (AUTOMOC_MOC_OPTIONS -D_WIN32)
+QT5_ADD_RESOURCES(${UNIT_NAME}_SRCS_RCS ${${UNIT_NAME}_RCS})
+
+GET_DIRECTORY_PROPERTY(_flags COMPILE_DEFINITIONS)
+SEPARATE_ARGUMENTS(_flags)
+LIST(APPEND moc_includes ${_flags})
+
+#Create custom config file for project and set VC++ to current_qtdir\bin
+IF(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+IF(X64_BUILD)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/${UNIT_NAME}.Cpp.user.props" [=[
+<?xml version="1.0" encoding="utf-8"?> 
+ <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+   <ExecutablePath>$(QT5_PATH_511_X64)\bin;$(ExecutablePath);</ExecutablePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+   <ExecutablePath>$(QT5_PATH_511_X64)\bin;$(ExecutablePath);</ExecutablePath>
+  </PropertyGroup>
+ </Project>
+]=])
+else(X64_BUILD)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/${UNIT_NAME}.Cpp.user.props" [=[
+<?xml version="1.0" encoding="utf-8"?> 
+ <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+   <ExecutablePath>$(qt5_path_511)\bin;$(ExecutablePath);</ExecutablePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+   <ExecutablePath>$(qt5_path_511)\bin;$(ExecutablePath);</ExecutablePath>
+  </PropertyGroup>
+ </Project>
+]=])
+ENDIF(X64_BUILD)
+ENDIF(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+
+ADD_QT_L10N_DEPENDENCY()
+
+#Hopefully won't break anything
+SET(CMAKE_SKIP_BUILD_RPATH TRUE)
+
+IF(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+SET(${UNIT_NAME}_WRC "ClientQt4.rc")
+	ADD_EXECUTABLE(
+		${UNIT_NAME}
+		WIN32
+		${${UNIT_NAME}_SRCS}
+		${${UNIT_NAME}_HDRS}
+		${${UNIT_NAME}_SRCS_RCS}
+		${${UNIT_NAME}_WRC}
+	)
+ELSE(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+	ADD_EXECUTABLE(
+		${UNIT_NAME}
+		${${UNIT_NAME}_SRCS}
+		${${UNIT_NAME}_HDRS}
+		${${UNIT_NAME}_SRCS_RCS}
+	)
+ENDIF(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+
+target_compile_definitions(${UNIT_NAME} PRIVATE ${DEFINES})
+
+
+#Set target properties to custom file
+IF(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+set_target_properties(${UNIT_NAME} PROPERTIES LINK_FLAGS "/DELAYLOAD:nvcuda.dll /DELAYLOAD:nvcuvid.dll")
+set_target_properties(${UNIT_NAME} PROPERTIES VS_USER_PROPS "${UNIT_NAME}.Cpp.user.props")
+ENDIF(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+
+SET_TARGET_PROPERTIES(${UNIT_NAME} PROPERTIES OUTPUT_NAME ${BIN_OUTPUT_NAME})
+UNSET(BIN_OUTPUT_NAME CACHE)
+
+
+SET(QTLIBS Qt5::Widgets Qt5::Core Qt5::Gui Qt5::Network Qt5::Multimedia Qt5::WebEngine Qt5::WebEngineWidgets)
+
+
+TARGET_LINK_LIBRARIES(
+${UNIT_NAME}
+${QTLIBS}
+C:/Other_libraries/tcw_730_20190307.3/libusb1/MS64/dll/libusb-1.0.lib
+)
+
+if (COMMAND cotire)
+set_target_properties(${UNIT_NAME} PROPERTIES COTIRE_ENABLE_PRECOMPILED_HEADER FALSE)
+cotire(${UNIT_NAME})
+endif ()
+
+# Step#1 Copy nessesary dlls from external libs folder
+# Step#2 Add qt.conf file to avoid errors with qt plugin dlls
+# Step#3 Amend manifest to tell Windows that the application is DPI aware (needed for Windows 8.1 and up)
+IF (CMAKE_SYSTEM_NAME MATCHES "Windows")
+    STRING(REPLACE "\\" "/" QT_CONF_PREFIX ${QT5_PATH})
+    SET(ROBOCOPY_PARAMS /NFL /NDL /NP /NS /NC /NJH /R:0 /E /XO)
+
+    ADD_CUSTOM_COMMAND(
+        TARGET ${UNIT_NAME}
+        POST_BUILD
+        COMMAND Echo.$(Configuration) | findstr /I /C:"Release">nul && (\n    (robocopy \"${CLIENTLIB_EXTLIBS_DIR}\\dll\\${ARCH}\\Release\" \"$(OutDir)\\\" ${ROBOCOPY_PARAMS} ) ^& cd .\n) || (\n    (robocopy \"${CLIENTLIB_EXTLIBS_DIR}\\dll\\${ARCH}\\Debug\" \"$(OutDir)\\\" ${ROBOCOPY_PARAMS}) ^& cd .\n)
+        COMMAND IF NOT EXIST \"$(OutDir)qt.conf\" echo [Paths]^\n\nPrefix = ${QT_CONF_PREFIX} >\"$(OutDir)qt.conf\"
+        COMMAND "mt.exe" -manifest \"${CMAKE_CURRENT_SOURCE_DIR}/../winbased/dpiaware.manifest\" -outputresource:\"${PROJECT_BINARY_DIR}/${UNIT_NAME}/${CMAKE_CFG_INTDIR}/${BIN_OUTPUT_NAME}.exe\"\;\#1
+        COMMENT "Adding display aware manifest..." 
+    )
+ENDIF (CMAKE_SYSTEM_NAME MATCHES "Windows")
+
+INCLUDE(GroupSources)
